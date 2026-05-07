@@ -7,15 +7,15 @@ const FEISHU_WEBHOOK = (process.env.FEISHU_WEBHOOK || '').trim();
 
 async function run() {
     try {
-        // 格式化日期为：May 7, 2026
-        const today = new Date().toLocaleDateString('en-US', { 
+        const dateObj = new Date();
+        const today = dateObj.toLocaleDateString('en-US', { 
             timeZone: 'Asia/Shanghai', 
             year: 'numeric', 
             month: 'long', 
             day: 'numeric' 
         });
         
-        console.log(`1. 同步数据源 [${today}]...`);
+        console.log(`1. 同步 Zara 中央数据源 [${today}]...`);
         const [xRes, podRes, blogRes] = await Promise.all([
             axios.get(`${BASE_URL}/feed-x.json`).catch(() => ({ data: { x: [] } })),
             axios.get(`${BASE_URL}/feed-podcasts.json`).catch(() => ({ data: { podcasts: [] } })),
@@ -28,29 +28,30 @@ async function run() {
             blogs: blogRes.data.blogs || []
         };
 
-        // 核心 Prompt：严格控制输出顺序和禁言开场白
-        const systemPrompt = `你是一个高级 AI 行业主编。请严格遵守以下排版规范：
+        // 严格复刻 Zara 的 Prompt 逻辑
+        const systemPrompt = `You are a professional AI news editor. Summarize the provided data into a digest.
 
-1. **禁止开场白**：严禁输出“好的”、“作为分析师”等任何前导文字，直接从标题开始。
-2. **置顶标题**：第一行必须是：AI Builders Digest — ${today}，后面紧跟一根分割线。
-3. **大类标题**：使用 ## X / TWITTER, ## PODCASTS, ## BLOGS。
-4. **单条条目结构**（严格顺序）：
-   - **姓名 (身份)**
-   - English: [英文总结内容]
-   - Chinese: [中文总结内容]
-   - URL: [原始链接]
-5. **推特规范**：推特仅保留单行核心动态总结，不要写长篇大论。
-6. **视觉隔离**：条目之间使用 --- 分割。`;
+**CRITICAL RULES**:
+1. **NO INTRO OR OUTRO**: Start immediately with the title. Do not say "Here is the summary" or "As an AI analyst".
+2. **HEADER**: The very first line must be "AI Builders Digest — ${today}" followed by a full-width horizontal rule "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".
+3. **CATEGORIES**: Use "## X / TWITTER", "## PODCASTS", and "## BLOGS" as section headers.
+4. **ENTRY STRUCTURE**: 
+   - **Name (Role/Context)**
+   - English: [One paragraph summary]
+   - Chinese: [对应的中文总结]
+   - URL: [Direct link]
+5. **SPACING**: Use "---" between entries within a section.
+6. **LANGUAGE**: Always provide bilingual content (English followed by Chinese).`;
 
-        console.log("2. DeepSeek 正在执行纯净版排版...");
+        console.log("2. DeepSeek 正在进行原厂格式复刻...");
         
         const dsResponse = await axios.post("https://api.deepseek.com/chat/completions", {
             model: "deepseek-v4-flash",
             messages: [
                 { role: "system", content: systemPrompt },
-                { role: "user", content: `数据源：${JSON.stringify(combinedData)}` }
+                { role: "user", content: `Data: ${JSON.stringify(combinedData)}` }
             ],
-            temperature: 0.2 // 降低随机性，确保格式稳定
+            temperature: 0.1 // 极低随机性，确保格式像模子刻出来的一样
         }, {
             headers: { "Authorization": `Bearer ${DEEPSEEK_API_KEY}` },
             timeout: 120000
@@ -58,7 +59,7 @@ async function run() {
 
         const resultText = dsResponse.data.choices[0].message.content;
 
-        console.log("3. 推送飞书卡片...");
+        console.log("3. 推送至飞书卡片...");
         await axios.post(FEISHU_WEBHOOK, {
             msg_type: "interactive",
             card: {
@@ -70,7 +71,7 @@ async function run() {
             }
         });
 
-        console.log("✅ 纯净版格式推送成功！");
+        console.log("✅ 完美复刻版简报已推送！");
     } catch (error) {
         console.error("❌ 失败:", error.message);
         process.exit(1);
