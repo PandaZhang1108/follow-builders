@@ -20,20 +20,22 @@ async function run() {
             blogs: blogRes.data.blogs || []
         };
 
-        const prompt = `你是一个 AI 分析师。请对以下数据进行中英双语总结。每条推特总结后必须单独换行显示 URL。
-        数据：${JSON.stringify(combinedData)}`;
+        const prompt = `你是一个专业的 AI 分析师。请对以下数据进行深度总结。
+        【要求】：
+        1. 中英双语对照。
+        2. 每条推特总结后必须换行显示对应的 URL。
+        3. 播客和博客提取 3 个核心 Key Takeaways。
+        数据内容：${JSON.stringify(combinedData)}`;
 
         // 【核心修改】定义模型梯队，解决 429 报错
         const modelsToTry = [
-            'gemini-3.1-pro-preview',   // 逻辑最强，但限流严
-            'gemini-3-flash-preview',    // 速度极快，几乎不限流
-            'gemini-3.1-flash-lite-preview' // 最后的保底
+            'gemini-3.1-pro-preview',     // 优先求助最强大脑
+            'gemini-3-flash-preview',      // 备选，速度快，限流松
+            'gemini-3.1-flash-lite-preview' // 最后保底
         ];
 
         let resultText = null;
         let usedModel = '';
-
-        console.log("2. 正在向 Gemini 发起请求...");
 
         for (const model of modelsToTry) {
             try {
@@ -42,7 +44,7 @@ async function run() {
                 
                 const response = await axios.post(geminiUrl, {
                     contents: [{ parts: [{ text: prompt }] }]
-                }, { timeout: 60000 });
+                }, { timeout: 90000 });
 
                 if (response.data?.candidates?.[0]?.content?.parts?.[0]?.text) {
                     resultText = response.data.candidates[0].content.parts[0].text;
@@ -51,26 +53,24 @@ async function run() {
                 }
             } catch (e) {
                 if (e.response?.status === 429) {
-                    console.log(`⚠️ 模型 ${model} 暂时忙碌 (429)，尝试切换下一个...`);
+                    console.log(`⚠️ 模型 ${model} 暂时忙碌 (429)，2 秒后尝试下一个...`);
                 } else {
                     console.log(`❌ ${model} 报错: ${e.message}`);
                 }
-                // 等待 2 秒再尝试下一个，避免连续触发限制
-                await new Promise(resolve => setTimeout(resolve, 2000));
+                await new Promise(res => setTimeout(res, 2000));
             }
         }
 
-        if (!resultText) throw new Error("所有模型均无法响应。");
+        if (!resultText) throw new Error("今日 Gemini API 额度已全部耗尽。");
 
-        console.log(`3. 正在推送至飞书 (由 ${usedModel} 生成)...`);
+        console.log(`2. 正在推送至飞书 (由 ${usedModel} 生成)...`);
         await axios.post(FEISHU_WEBHOOK, {
             msg_type: "interactive",
             card: {
-                header: { title: { tag: "plain_text", content: `🌐 AI Builders Digest (${usedModel})` }, template: "green" },
+                header: { title: { tag: "plain_text", content: `🌐 AI Builders Full Digest (${usedModel})` }, template: "green" },
                 elements: [{ tag: "markdown", content: resultText }]
             }
         });
-
         console.log("✅ 简报发送成功！");
     } catch (error) {
         console.error("❌ 流程异常:", error.message);
