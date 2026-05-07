@@ -7,7 +7,9 @@ const FEISHU_WEBHOOK = (process.env.FEISHU_WEBHOOK || '').trim();
 
 async function run() {
     try {
-        console.log("1. 正在同步 Zara 的中央数据源...");
+        const today = new Date().toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: 'long', day: 'numeric' });
+        
+        console.log(`1. 同步数据源 [${today}]...`);
         const [xRes, podRes, blogRes] = await Promise.all([
             axios.get(`${BASE_URL}/feed-x.json`).catch(() => ({ data: { x: [] } })),
             axios.get(`${BASE_URL}/feed-podcasts.json`).catch(() => ({ data: { podcasts: [] } })),
@@ -20,44 +22,46 @@ async function run() {
             blogs: blogRes.data.blogs || []
         };
 
-        const systemPrompt = `你是一个专业的 AI 行业分析师。
-        【任务】：对提供的原始数据进行深度总结。
-        【要求】：
-        1. 必须采用中英双语对照格式。
-        2. 每一条总结后，必须换行显示其原始 URL 链接。
-        3. 播客和博客部分请提取核心 Key Takeaways。`;
+        const systemPrompt = `你是一个高级 AI 行业主编。
+        【任务】：根据原始数据制作一份《AI 开发者日报》。
+        【结构要求】：
+        1. **In Brief (头条快讯)**：在开头用 3 句极简的话总结今天最重磅的 3 件事。
+        2. **角色定义**：提及人物时，必须采用 "姓名 (职位/背景)" 的格式，例如 "Sam Altman (OpenAI CEO)"。
+        3. **中英双语**：严格执行中英双语对照。
+        4. **内容细化**：推特动态要详尽，播客和博客提取 3 个深度 Key Takeaways。
+        5. **链接闭环**：每个要点后必须换行显示原始 URL。`;
 
-        console.log("2. 正在请求 DeepSeek-V4-Flash 进行深度加工...");
+        console.log("2. DeepSeek 正在润色加工...");
         
         const dsResponse = await axios.post("https://api.deepseek.com/chat/completions", {
-            model: "deepseek-v4-flash", // 2026 旗舰性价比模型
+            model: "deepseek-v4-flash",
             messages: [
                 { role: "system", content: systemPrompt },
-                { role: "user", content: `原始数据：\n${JSON.stringify(combinedData)}` }
+                { role: "user", content: `日期：${today}\n原始数据：${JSON.stringify(combinedData)}` }
             ],
             temperature: 0.3
         }, {
-            headers: { 
-                "Authorization": `Bearer ${DEEPSEEK_API_KEY}`,
-                "Content-Type": "application/json"
-            },
+            headers: { "Authorization": `Bearer ${DEEPSEEK_API_KEY}` },
             timeout: 120000
         });
 
         const resultText = dsResponse.data.choices[0].message.content;
 
-        console.log("3. 正在推送至飞书...");
+        console.log("3. 推送飞书卡片...");
         await axios.post(FEISHU_WEBHOOK, {
             msg_type: "interactive",
             card: {
-                header: { title: { tag: "plain_text", content: "🚀 AI Builders Digest (DeepSeek Powered)" }, template: "blue" },
+                header: { 
+                    title: { tag: "plain_text", content: `📅 AI Builders Digest | ${today}` }, 
+                    template: "blue" // 飞书卡片主题色：blue, wathet, turquoise, green, yellow, orange, red, carmine, violet, purple, indigo, grey
+                },
                 elements: [{ tag: "markdown", content: resultText }]
             }
         });
 
-        console.log("✅ DeepSeek 版简报推送成功！");
+        console.log("✅ 满血版简报已送达！");
     } catch (error) {
-        console.error("❌ 运行异常:", error.response?.data || error.message);
+        console.error("❌ 失败:", error.message);
         process.exit(1);
     }
 }
