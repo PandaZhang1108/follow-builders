@@ -24,4 +24,4 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
-        run: node scripts/github_action_run.js
+        run: node scripts/github_action_run.cjs
