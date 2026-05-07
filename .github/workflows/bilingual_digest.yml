@@ -20,8 +20,8 @@ jobs:
       - name: Install dependencies
         run: npm install axios
 
-      - name: Run Deep Digest Script
+      - name: Run Digest Script
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
         run: node scripts/github_action_run.cjs
