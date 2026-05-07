@@ -1,6 +1,5 @@
 const axios = require('axios');
 
-// 配置信息
 const SOURCE_USER = 'zarazhangrui'; 
 const BASE_URL = `https://raw.githubusercontent.com/${SOURCE_USER}/follow-builders/main`;
 const GEMINI_API_KEY = (process.env.GEMINI_API_KEY || '').trim();
@@ -8,8 +7,7 @@ const FEISHU_WEBHOOK = (process.env.FEISHU_WEBHOOK || '').trim();
 
 async function run() {
     try {
-        console.log("1. 正在同步 Zara 的中央数据源（含推特、播客、博客）...");
-        // 同时抓取三个维度的内容，确保不漏掉任何播客和 YouTube
+        console.log("1. 正在同步中央数据源...");
         const [xRes, podRes, blogRes] = await Promise.all([
             axios.get(`${BASE_URL}/feed-x.json`).catch(() => ({ data: { x: [] } })),
             axios.get(`${BASE_URL}/feed-podcasts.json`).catch(() => ({ data: { podcasts: [] } })),
@@ -19,46 +17,63 @@ async function run() {
         const combinedData = {
             tweets: xRes.data.x || [],
             podcasts: podRes.data.podcasts || [],
-            blogs: blogRes.data.blogs || [],
-            date: new Date().toLocaleDateString()
+            blogs: blogRes.data.blogs || []
         };
 
-        console.log(`📊 数据捕获：推特(${combinedData.tweets.length}) | 播客(${combinedData.podcasts.length}) | 博客(${combinedData.blogs.length})`);
+        const prompt = `你是一个 AI 分析师。请对以下数据进行中英双语总结。每条推特总结后必须单独换行显示 URL。
+        数据：${JSON.stringify(combinedData)}`;
 
-        const prompt = `
-            你是一个专业的 AI 行业分析师。请对以下原始数据进行深度总结。
-            
-            【核心规则】：
-            1. 采用中英双语对照格式输出。
-            2. 每一个总结要点后，必须换行显示对应的原始 URL 链接，严禁遗漏链接。
-            3. 播客和博客部分请提取出 3 个核心金句（Key Takeaways）。
-            
-            原始数据如下：
-            ${JSON.stringify(combinedData)}
-        `;
+        // 【核心修改】定义模型梯队，解决 429 报错
+        const modelsToTry = [
+            'gemini-3.1-pro-preview',   // 逻辑最强，但限流严
+            'gemini-3-flash-preview',    // 速度极快，几乎不限流
+            'gemini-3.1-flash-lite-preview' // 最后的保底
+        ];
 
-        // 升级为 3.1 Pro 模型，彻底解决链接幻觉问题
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent?key=${GEMINI_API_KEY}`;
-        
-        console.log("2. 正在请求 Gemini 3.1 Pro 进行深度加工...");
-        const response = await axios.post(geminiUrl, {
-            contents: [{ parts: [{ text: prompt }] }]
-        });
+        let resultText = null;
+        let usedModel = '';
 
-        const resultText = response.data.candidates[0].content.parts[0].text;
+        console.log("2. 正在向 Gemini 发起请求...");
 
-        console.log("3. 正在推送至飞书...");
+        for (const model of modelsToTry) {
+            try {
+                console.log(`尝试使用模型: ${model}...`);
+                const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
+                
+                const response = await axios.post(geminiUrl, {
+                    contents: [{ parts: [{ text: prompt }] }]
+                }, { timeout: 60000 });
+
+                if (response.data?.candidates?.[0]?.content?.parts?.[0]?.text) {
+                    resultText = response.data.candidates[0].content.parts[0].text;
+                    usedModel = model;
+                    break; 
+                }
+            } catch (e) {
+                if (e.response?.status === 429) {
+                    console.log(`⚠️ 模型 ${model} 暂时忙碌 (429)，尝试切换下一个...`);
+                } else {
+                    console.log(`❌ ${model} 报错: ${e.message}`);
+                }
+                // 等待 2 秒再尝试下一个，避免连续触发限制
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+        }
+
+        if (!resultText) throw new Error("所有模型均无法响应。");
+
+        console.log(`3. 正在推送至飞书 (由 ${usedModel} 生成)...`);
         await axios.post(FEISHU_WEBHOOK, {
             msg_type: "interactive",
             card: {
-                header: { title: { tag: "plain_text", content: "🌐 AI Builders Full-Spectrum Digest" }, template: "violet" },
+                header: { title: { tag: "plain_text", content: `🌐 AI Builders Digest (${usedModel})` }, template: "green" },
                 elements: [{ tag: "markdown", content: resultText }]
             }
         });
 
-        console.log("✅ 满血版简报推送成功！");
+        console.log("✅ 简报发送成功！");
     } catch (error) {
-        console.error("❌ 运行失败:", error.message);
+        console.error("❌ 流程异常:", error.message);
         process.exit(1);
     }
 }
